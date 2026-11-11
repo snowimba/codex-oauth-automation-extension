@@ -252,8 +252,8 @@ test('sidepanel has the batch restore section and controls', () => {
   assert.match(sidepanelSource, /GET_RESTORE_RESULTS/);
 });
 
-test('manifest is bumped to 6.5 for the restore runner release', () => {
+test('manifest is bumped to 6.6 for the consent snapshot release', () => {
   const manifest = JSON.parse(fs.readFileSync('manifest.json', 'utf8'));
-  assert.equal(manifest.version, '6.5');
-  assert.equal(manifest.version_name, 'Ultra6.5');
+  assert.equal(manifest.version, '6.6');
+  assert.equal(manifest.version_name, 'Ultra6.6');
 });

@@ -12047,6 +12047,7 @@ async function waitForStep8ClickEffect(tabId, baselineUrl, timeoutMs = STEP8_CLI
   const visibleStep = Math.floor(Number(options.visibleStep) || 0) || 9;
   const start = Date.now();
   let recovered = false;
+  let lastSnapshot = null;
 
   while (Date.now() - start < timeoutMs) {
     throwIfStopped();
@@ -12061,6 +12062,9 @@ async function waitForStep8ClickEffect(tabId, baselineUrl, timeoutMs = STEP8_CLI
     }
 
     const pageState = await getStep8PageState(tabId, 1500, visibleStep);
+    if (pageState?.snapshot) {
+      lastSnapshot = pageState.snapshot;
+    }
     if (pageState?.maxCheckAttemptsBlocked) {
       throw new Error(`${CLOUDFLARE_SECURITY_BLOCK_ERROR_PREFIX}${CLOUDFLARE_SECURITY_BLOCK_USER_MESSAGE}`);
     }
@@ -12105,7 +12109,7 @@ async function waitForStep8ClickEffect(tabId, baselineUrl, timeoutMs = STEP8_CLI
     await sleepWithStop(200);
   }
 
-  return { progressed: false, reason: 'no_effect' };
+  return { progressed: false, reason: 'no_effect', snapshot: lastSnapshot };
 }
 
 function getStep8EffectLabel(effect) {

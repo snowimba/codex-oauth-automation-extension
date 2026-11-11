@@ -2715,6 +2715,46 @@ function getOAuthConsentForm() {
   return document.querySelector(OAUTH_CONSENT_FORM_SELECTOR);
 }
 
+// 同意页快照：步骤 9 点击“继续”后页面无反应时，靠它看清页面到底
+// 是什么状态——是哪个账号、按钮能不能点、表单指向哪、有没有未勾选
+// 的复选框或人机验证，而不是像以前那样盲目刷新重试 5 轮。
+const CONSENT_CAPTCHA_SELECTOR = 'iframe[src*="captcha" i], iframe[src*="hcaptcha" i], iframe[src*="recaptcha" i], iframe[src*="turnstile" i], iframe[src*="challenges.cloudflare.com" i], [class*="captcha" i], [class*="turnstile" i], [id*="captcha" i]';
+const CONSENT_CAPTCHA_TEXT_PATTERN = /captcha|hcaptcha|recaptcha|turnstile|人机验证|滑块验证|verify you are human/i;
+
+function getOAuthConsentSnapshot() {
+  const continueBtn = getPrimaryContinueButton();
+  const consentForm = getOAuthConsentForm();
+  const pageText = getPageTextSnapshot();
+  const headings = Array.from(document.querySelectorAll('h1, h2'))
+    .map((el) => (el.innerText || '').trim())
+    .filter(Boolean)
+    .slice(0, 3);
+  const formButtons = consentForm
+    ? Array.from(consentForm.querySelectorAll('button[type="submit"], input[type="submit"], [role="button"]'))
+    : [];
+  return {
+    title: String(document.title || '').trim(),
+    url: location.href,
+    headings,
+    textSample: pageText.slice(0, 300),
+    displayedEmail: getLoginVerificationDisplayedEmail(),
+    buttonFound: Boolean(continueBtn),
+    buttonText: continueBtn ? getActionText(continueBtn) : '',
+    buttonDisabled: continueBtn ? !isButtonEnabled(continueBtn) : null,
+    buttonTag: continueBtn ? String(continueBtn.tagName || '').toLowerCase() : '',
+    formAction: consentForm ? String(consentForm.getAttribute('action') || '') : '',
+    submitCount: formButtons.length,
+    hasUncheckedCheckbox: consentForm
+      ? Array.from(consentForm.querySelectorAll('input[type="checkbox"]'))
+        .some((el) => isVisibleElement(el) && !el.checked)
+      : false,
+    hasCaptcha: Boolean(
+      document.querySelector(CONSENT_CAPTCHA_SELECTOR)
+      || CONSENT_CAPTCHA_TEXT_PATTERN.test(pageText)
+    ),
+  };
+}
+
 function getPrimaryContinueButton() {
   const consentForm = getOAuthConsentForm();
   if (consentForm) {
@@ -5790,6 +5830,7 @@ function getStep8State() {
     buttonFound: Boolean(continueBtn),
     buttonEnabled: isButtonEnabled(continueBtn),
     buttonText: continueBtn ? getActionText(continueBtn) : '',
+    snapshot: getOAuthConsentSnapshot(),
   };
 
   if (continueBtn) {

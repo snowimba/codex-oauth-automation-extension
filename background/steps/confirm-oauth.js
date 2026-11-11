@@ -1,6 +1,31 @@
 (function attachBackgroundStep9(root, factory) {
   root.MultiPageBackgroundStep9 = factory();
 })(typeof self !== 'undefined' ? self : globalThis, function createBackgroundStep9Module() {
+  // 把同意页快照拼成一行日志，方便从日志里直接看清页面状态。
+  function formatStep8ConsentSnapshot(snapshot) {
+    if (!snapshot || typeof snapshot !== 'object') {
+      return '无快照';
+    }
+    const parts = [];
+    if (snapshot.url) parts.push(`URL：${snapshot.url}`);
+    if (snapshot.title) parts.push(`标题：${snapshot.title}`);
+    if (Array.isArray(snapshot.headings) && snapshot.headings.length) {
+      parts.push(`标题文案：${snapshot.headings.join(' / ')}`);
+    }
+    if (snapshot.displayedEmail) parts.push(`页面显示账号：${snapshot.displayedEmail}`);
+    parts.push(
+      snapshot.buttonFound
+        ? `继续按钮：${snapshot.buttonText || '（无文案）'}（${snapshot.buttonTag || 'button'}，${snapshot.buttonDisabled ? '不可点' : '可点'}）`
+        : '继续按钮：未找到'
+    );
+    if (snapshot.formAction) parts.push(`表单 action：${snapshot.formAction}`);
+    if (typeof snapshot.submitCount === 'number') parts.push(`表单内提交按钮数：${snapshot.submitCount}`);
+    if (snapshot.hasUncheckedCheckbox) parts.push('表单内有未勾选的复选框');
+    if (snapshot.hasCaptcha) parts.push('检测到人机验证元素');
+    if (snapshot.textSample) parts.push(`页面文案：${snapshot.textSample}`);
+    return parts.join('；');
+  }
+
   function createStep9Executor(deps = {}) {
     const {
       addLog,
@@ -285,10 +310,16 @@
               }
 
               if (round >= STEP8_MAX_ROUNDS) {
-                throw new Error(`步骤 ${visibleStep}：连续 ${STEP8_MAX_ROUNDS} 轮点击“继续”后页面仍无反应。`);
+                throw new Error(`步骤 ${visibleStep}：连续 ${STEP8_MAX_ROUNDS} 轮点击“继续”后页面仍无反应。快照：${formatStep8ConsentSnapshot(effect.snapshot)}`);
               }
 
-              await addStepLog(visibleStep, `${strategy.label} 本轮点击后页面无反应，正在刷新认证页后重试（下一轮 ${round + 1}/${STEP8_MAX_ROUNDS}）...`, 'warn');
+              // 人机验证拦住提交时，再点多少轮都没用：第二轮还没生效就
+              // 直接报错，让用户在认证页手动完成验证，而不是把 5 轮打满。
+              if (effect.snapshot?.hasCaptcha && round >= 2) {
+                throw new Error(`步骤 ${visibleStep}：同意页出现人机验证，自动点击被拦截，请在认证页手动完成验证后再试。快照：${formatStep8ConsentSnapshot(effect.snapshot)}`);
+              }
+
+              await addStepLog(visibleStep, `${strategy.label} 本轮点击后页面无反应，正在刷新认证页后重试（下一轮 ${round + 1}/${STEP8_MAX_ROUNDS}）。快照：${formatStep8ConsentSnapshot(effect.snapshot)}`, 'warn');
               await reloadStep8ConsentPage(
                 signupTabId,
                 typeof getOAuthFlowStepTimeoutMs === 'function'
@@ -308,8 +339,8 @@
       });
     }
 
-    return { executeStep9 };
+    return { executeStep9, formatStep8ConsentSnapshot };
   }
 
-  return { createStep9Executor };
+  return { createStep9Executor, formatStep8ConsentSnapshot };
 });
