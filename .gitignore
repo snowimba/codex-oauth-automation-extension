@@ -1,12 +1,15 @@
-.DS_Store
-Thumbs.db
+/docs/md
 
-.idea/
-.vscode/
+/.github
+/_metadata/
+.vscode
 
-node_modules/
-
-*.log
-
-.ace-tool/
-.playwright-mcp/
+/data/account-run-history.txt
+/data/account-run-history.json
+.npm-test.log
+.omx/
+/node_modules
+/.runtime
+/docs/新步骤顺序
+# Local exported runtime settings
+/config.json

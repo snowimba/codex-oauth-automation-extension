@@ -1,22 +1,41 @@
 {
   "manifest_version": 3,
-  "name": "SimpleAuthFlow",
-  "version": "3.1.0",
-  "description": "一个简化 ChatGPT OAuth 流程的 Chrome 扩展",
+  "name": "codex-oauth-automation-extension",
+  "version": "6.4",
+  "version_name": "Ultra6.4",
+  "description": "用于自动执行多步骤 OAuth 注册流程",
   "permissions": [
     "sidePanel",
+    "alarms",
     "tabs",
     "webNavigation",
+    "webRequest",
+    "webRequestAuthProvider",
+    "proxy",
+    "declarativeNetRequest",
     "debugger",
+    "browsingData",
+    "cookies",
     "storage",
     "scripting",
     "activeTab"
   ],
   "host_permissions": [
+    "https://*.icloud.com/*",
+    "https://*.icloud.com.cn/*",
     "<all_urls>"
   ],
   "background": {
     "service_worker": "background.js"
+  },
+  "declarative_net_request": {
+    "rule_resources": [
+      {
+        "id": "icloud_headers",
+        "enabled": true,
+        "path": "rules.json"
+      }
+    ]
   },
   "side_panel": {
     "default_path": "sidepanel/sidepanel.html"
@@ -28,29 +47,14 @@
         "https://auth.openai.com/*",
         "https://accounts.openai.com/*"
       ],
-      "js": ["content/utils.js", "content/signup-page.js"],
-      "run_at": "document_idle"
-    },
-    {
-      "matches": [
-        "https://burnermailbox.com/mailbox*",
-        "https://burnermailbox.com/switch/*"
+      "js": [
+        "content/activation-utils.js",
+        "content/utils.js",
+        "content/auth-page-recovery.js",
+        "content/phone-country-utils.js",
+        "content/phone-auth.js",
+        "content/signup-page.js"
       ],
-      "js": ["content/utils.js", "content/burner-mail.js"],
-      "run_at": "document_idle"
-    },
-    {
-      "matches": [
-        "https://www.2925.com/*"
-      ],
-      "js": ["content/utils.js", "shared/mail-2925.js", "content/2925-mail.js"],
-      "run_at": "document_idle"
-    },
-    {
-      "matches": [
-        "https://duckduckgo.com/email/settings/autofill*"
-      ],
-      "js": ["content/utils.js", "content/duck-mail.js"],
       "run_at": "document_idle"
     },
     {
@@ -58,17 +62,52 @@
         "https://mail.qq.com/*",
         "https://wx.mail.qq.com/*"
       ],
-      "js": ["content/utils.js", "content/qq-mail.js"],
+      "js": [
+        "content/activation-utils.js",
+        "content/utils.js",
+        "content/qq-mail.js"
+      ],
       "all_frames": true,
       "run_at": "document_idle"
     },
     {
       "matches": [
         "https://mail.163.com/*",
-        "https://*.mail.163.com/*"
+        "https://*.mail.163.com/*",
+        "https://webmail.vip.163.com/*",
+        "https://mail.126.com/*",
+        "https://*.mail.126.com/*"
       ],
-      "js": ["content/utils.js", "content/mail-163.js"],
+      "js": [
+        "content/activation-utils.js",
+        "content/utils.js",
+        "content/mail-163.js"
+      ],
       "all_frames": true,
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://www.icloud.com/*",
+        "https://www.icloud.com.cn/*"
+      ],
+      "js": [
+        "content/activation-utils.js",
+        "content/utils.js",
+        "content/icloud-mail.js"
+      ],
+      "all_frames": true,
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://duckduckgo.com/email/settings/autofill*"
+      ],
+      "js": [
+        "content/activation-utils.js",
+        "content/utils.js",
+        "content/duck-mail.js"
+      ],
       "run_at": "document_idle"
     }
   ],
