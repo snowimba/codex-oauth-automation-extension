@@ -289,8 +289,8 @@ test('restore runner wiring references only bindings defined in background.js', 
   assert.doesNotMatch(backgroundSource, /^\s*findSavedPassword,$/m);
 });
 
-test('manifest is bumped to 6.7 for the service worker load fix', () => {
+test('manifest is bumped to 6.8 for the restore forced-login release', () => {
   const manifest = JSON.parse(fs.readFileSync('manifest.json', 'utf8'));
-  assert.equal(manifest.version, '6.7');
-  assert.equal(manifest.version_name, 'Ultra6.7');
+  assert.equal(manifest.version, '6.8');
+  assert.equal(manifest.version_name, 'Ultra6.8');
 });

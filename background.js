@@ -635,6 +635,9 @@ const PERSISTED_SETTING_DEFAULTS = {
   autoRunSkipFailures: false,
   autoRunFallbackThreadIntervalMinutes: 0,
   oauthFlowTimeoutEnabled: true,
+  // 批量恢复专用：为 true 时步骤 7 在 OAuth 链接上追加 prompt=login，
+  // 强制重新登录，不沿用浏览器已有会话。默认 false，不影响正常注册。
+  restoreForceLogin: false,
   autoRunDelayEnabled: false,
   autoRunDelayMinutes: 30,
   autoStepDelaySeconds: null,

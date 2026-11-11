@@ -74,7 +74,10 @@
       // 每轮从干净状态开始：resetState 会保留持久化设置（VPS 地址、
       // 自定义密码、收码邮箱等），这里只把当前账号的邮箱 / 密码 /
       // 收码邮箱写进去，并强制普通模式；同时关掉 5 分钟授权链总超时，
-      // 手动填验证码的账号等不起这个倒计时。
+      // 手动填验证码的账号等不起这个倒计时；再打开强制重新登录——
+      // 步骤 6 虽然清了 cookies，但浏览器会话仍可能残留，步骤 7 会
+      // 直接进同意页、跳过邮箱 + 验证码登录，恢复必须以当前账号自己
+      // 的身份登录，所以用 prompt=login 强制走登录页。
       await resetState();
       await setEmailState(email);
       await setPasswordState(password);
@@ -82,6 +85,7 @@
         plusModeEnabled: false,
         signupMethod: 'email',
         oauthFlowTimeoutEnabled: false,
+        restoreForceLogin: true,
       };
       if (inferred.mailProvider) {
         restoreStateUpdates.mailProvider = inferred.mailProvider;
@@ -91,7 +95,7 @@
       broadcastDataUpdate({ mailProvider: nextState.mailProvider });
 
       await addLog(
-        `批量恢复：第 ${index + 1}/${total} 个账号 ${email}（${result.manual ? '手动填登录验证码' : '收码邮箱：' + result.mailProvider}），开始重走步骤 6-10。`,
+        `批量恢复：第 ${index + 1}/${total} 个账号 ${email}（${result.manual ? '手动填登录验证码' : '收码邮箱：' + result.mailProvider}），开始重走步骤 6-10（强制重新登录）。`,
         'info'
       );
 

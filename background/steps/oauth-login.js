@@ -1,6 +1,33 @@
 (function attachBackgroundStep7(root, factory) {
   root.MultiPageBackgroundStep7 = factory();
 })(typeof self !== 'undefined' ? self : globalThis, function createBackgroundStep7Module() {
+  // 恢复模式用的登录链接处理：步骤 6 虽然清了已知域名下的 cookies，
+  // 但浏览器会话仍可能残留（比如其他标签页重新建立了会话），导致
+  // 步骤 7 打开 OAuth 链接后直接进入同意页，跳过邮箱 + 验证码登录。
+  // 恢复必须以当前账号自己的身份登录，所以在链接上追加 prompt=login
+  // 强制 Auth0 重新登录；链接已带 prompt 时不动它，由调用处的守卫
+  // 在仍直接进入同意页时报错，而不是悄悄替别的账号点同意。
+  function buildRestoreLoginUrl(oauthUrl, forceLogin) {
+    if (!forceLogin) {
+      return { url: oauthUrl, forced: false, alreadyHasPrompt: false, prompt: '' };
+    }
+    try {
+      const urlObject = new URL(oauthUrl);
+      if (urlObject.searchParams.has('prompt')) {
+        return {
+          url: oauthUrl,
+          forced: false,
+          alreadyHasPrompt: true,
+          prompt: urlObject.searchParams.get('prompt') || '',
+        };
+      }
+      urlObject.searchParams.set('prompt', 'login');
+      return { url: urlObject.toString(), forced: true, alreadyHasPrompt: false, prompt: 'login' };
+    } catch {
+      return { url: oauthUrl, forced: false, alreadyHasPrompt: false, prompt: '' };
+    }
+  }
+
   function createStep7Executor(deps = {}) {
     const {
       addLog,
@@ -98,6 +125,19 @@
             ? currentPhoneNumber
             : currentEmail;
           const oauthUrl = await refreshOAuthUrlBeforeStep6(currentState);
+          const loginUrlResult = buildRestoreLoginUrl(oauthUrl, Boolean(currentState.restoreForceLogin));
+          const loginUrl = loginUrlResult.url;
+          if (loginUrlResult.forced) {
+            await addLog('恢复模式：强制重新登录（prompt=login），不沿用浏览器已有会话。', 'info', {
+              step: completionStep,
+              stepKey: 'oauth-login',
+            });
+          } else if (loginUrlResult.alreadyHasPrompt) {
+            await addLog(`恢复模式：OAuth 链接已带 prompt=${loginUrlResult.prompt}，不再追加强制登录参数。`, 'warn', {
+              step: completionStep,
+              stepKey: 'oauth-login',
+            });
+          }
           if (typeof startOAuthFlowTimeoutWindow === 'function') {
             await startOAuthFlowTimeoutWindow({ step: completionStep, oauthUrl });
           }
@@ -121,7 +161,7 @@
             });
           }
 
-          await reuseOrCreateTab('signup-page', oauthUrl, { forceNew: true });
+          await reuseOrCreateTab('signup-page', loginUrl, { forceNew: true });
 
           const result = await sendToContentScriptResilient(
             'signup-page',
@@ -161,6 +201,11 @@
           }
 
           if (isStep6SuccessResult(result)) {
+            // 恢复模式下直接进入同意页等于没用当前账号登录：宁可报错，
+            // 也不能悄悄替浏览器里已登录的那个账号点同意。
+            if (currentState.restoreForceLogin && result.directOAuthConsentPage) {
+              throw new Error('恢复模式已强制重新登录，但认证页仍直接进入了同意页（浏览器会话未被清除）。请先退出当前 ChatGPT 登录，或换一个干净的浏览器会话后重试。');
+            }
             const completionPayload = {
               loginVerificationRequestedAt: result.loginVerificationRequestedAt || null,
             };
@@ -213,5 +258,5 @@
     return { executeStep7 };
   }
 
-  return { createStep7Executor };
+  return { createStep7Executor, buildRestoreLoginUrl };
 });

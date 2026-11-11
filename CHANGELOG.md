@@ -1,5 +1,12 @@
 # Changelog
 
+## 6.8 — 恢复强制重新登录，不再直接跳到步骤 9
+
+- 问题：步骤 6 虽然清了已知域名下的 cookies，但浏览器会话仍可能残留（比如其他标签页重新建立了会话），步骤 7 打开 OAuth 链接后直接进入同意页，跳过邮箱输入和验证码登录，直接走到步骤 9。
+- 恢复轮次现在会强制重新登录：步骤 7 在面板给的 OAuth 链接上追加 `prompt=login`（链接已带 prompt 时不动它），让 Auth0 每次都显示登录页，走邮箱 → 密码 → 验证码的完整链路；正常注册流程不受影响。
+- 守卫：如果强制登录后认证页仍直接进入同意页，步骤 7 直接报错（提示先退出当前 ChatGPT 登录或换干净的浏览器会话），而不是悄悄替浏览器里已登录的那个账号点同意。
+- 新增 `restoreForceLogin` 状态位（默认 false，每轮恢复开始时由 runner 打开，resetState 会清掉）。
+
 ## 6.7 — 修 Service Worker 加载失败（6.5 回归）
 
 - 6.5 接恢复 runner 时把 `findSavedPassword: findSavedRestorePassword` 写成了裸简写 `findSavedPassword,`，但 background.js 顶层没有这个名字的变量，Service Worker 一加载就报 `ReferenceError: findSavedPassword is not defined`，扩展直接起不来。已改回带别名的写法。
