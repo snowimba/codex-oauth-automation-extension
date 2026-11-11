@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "SimpleAuthFlow",
-  "version": "3.0.1",
+  "version": "3.1.0",
   "description": "一个简化 ChatGPT OAuth 流程的 Chrome 扩展",
   "permissions": [
     "sidePanel",

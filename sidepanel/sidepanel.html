@@ -177,6 +177,46 @@
     </div>
   </section>
 
+  <section id="restore-section">
+    <div class="steps-header">
+      <span class="section-label">批量恢复过期认证</span>
+      <span id="restore-progress" class="steps-progress">0 / 0</span>
+    </div>
+    <p class="modal-hint">把过期的认证文件名粘贴进来（一行一个），或直接选中那些 .json 文件——只读文件名，不读文件内容。扩展会从文件名解析出邮箱，跳过注册，只重走 1 → 6 → 7 → 8 → 9 登录授权，让 VPS 重新生成新认证文件。密码优先用扩展之前存下的账号密码，找不到就用下面填的通用密码。</p>
+    <div class="data-card">
+      <div class="data-row">
+        <span class="data-label">过期文件</span>
+        <textarea id="input-restore-list" class="data-input mono" rows="3" placeholder="codex-k5k4icd4g7@maoerai.cloud-free.json&#10;codex-user@qq.com.json"></textarea>
+      </div>
+      <div class="data-row">
+        <span class="data-label">选择文件</span>
+        <div class="data-inline">
+          <input type="file" id="input-restore-files" accept=".json" multiple />
+          <button id="btn-parse-restore" class="btn btn-outline btn-sm" type="button">解析</button>
+        </div>
+      </div>
+      <div class="data-row">
+        <span class="data-label">通用密码</span>
+        <input type="password" id="input-restore-password" class="data-input" placeholder="仅在扩展没存过该账号密码时使用，可留空" />
+      </div>
+      <div class="data-row data-check-row">
+        <span class="data-label">失败继续</span>
+        <label class="data-check" for="input-restore-continue">
+          <input type="checkbox" id="input-restore-continue" checked />
+          <span>某个账号恢复失败时继续恢复下一个</span>
+        </label>
+      </div>
+      <div class="data-row">
+        <span class="data-label">操作</span>
+        <div class="data-inline">
+          <button id="btn-start-restore" class="btn btn-primary btn-sm" type="button">开始恢复</button>
+          <button id="btn-export-restore" class="btn btn-outline btn-sm" type="button">导出结果</button>
+        </div>
+      </div>
+    </div>
+    <div id="restore-list" class="restore-list"></div>
+  </section>
+
   <section id="log-section">
     <div class="log-header">
       <span class="section-label">日志</span>

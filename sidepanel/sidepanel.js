@@ -51,7 +51,17 @@ const manualCodeModal = document.getElementById('manual-code-modal');
 const manualCodeTitle = document.getElementById('manual-code-title');
 const manualCodeHint = document.getElementById('manual-code-hint');
 const inputManualCode = document.getElementById('input-manual-code');
-const btnSubmitManualCode = document.getElementById('btn-submit-manual-code');
+const inputRestoreList = document.getElementById('input-restore-list');
+const inputRestoreFiles = document.getElementById('input-restore-files');
+const inputRestorePassword = document.getElementById('input-restore-password');
+const inputRestoreContinue = document.getElementById('input-restore-continue');
+const btnParseRestore = document.getElementById('btn-parse-restore');
+const btnStartRestore = document.getElementById('btn-start-restore');
+const btnExportRestore = document.getElementById('btn-export-restore');
+const restoreListEl = document.getElementById('restore-list');
+const restoreProgressEl = document.getElementById('restore-progress');
+let restoreItems = [];
+let restoreResults = [];
 const btnCancelManualCode = document.getElementById('btn-cancel-manual-code');
 const autoStartModal = document.getElementById('auto-start-modal');
 const autoStartTitle = document.getElementById('auto-start-title');
@@ -1312,6 +1322,10 @@ chrome.runtime.onMessage.addListener((message) => {
           hideManualCodeModal();
         }
       }
+      if (message.payload.restoreResults !== undefined) {
+        restoreResults = message.payload.restoreResults || [];
+        renderRestoreList();
+      }
       break;
     }
 
@@ -1323,6 +1337,126 @@ chrome.runtime.onMessage.addListener((message) => {
 });
 
 // ============================================================
+// 批量恢复过期认证
+// ============================================================
+// 只把文件名发给后台解析，不读文件内容。解析结果里 hasSavedPassword
+// 只表示“扩展之前存没存过这个账号的密码”，密码本身不会回传到侧边栏。
+
+const RESTORE_PROVIDER_LABELS = {
+  burner_mailbox: 'Burner',
+  mail_2925: '2925',
+  qq_mail: 'QQ',
+  mail_163: '163',
+};
+
+function renderRestoreList() {
+  if (!restoreListEl) return;
+  const done = restoreResults.filter((item) => item.status === 'ok').length;
+  if (restoreProgressEl) {
+    restoreProgressEl.textContent = `${done} / ${restoreItems.length}`;
+  }
+  if (!restoreItems.length) {
+    restoreListEl.innerHTML = '';
+    return;
+  }
+  const resultByEmail = new Map(restoreResults.map((item) => [item.email, item]));
+  restoreListEl.innerHTML = restoreItems.map((item) => {
+    const result = resultByEmail.get(item.email);
+    const status = result
+      ? (result.status === 'ok' ? '✓ 已恢复' : `✗ ${result.status === 'skipped' ? '已跳过' : '失败'}${result.error ? `：${result.error}` : ''}`)
+      : (item.hasSavedPassword ? '待恢复（密码已存）' : '待恢复（需通用密码）');
+    const providerLabel = item.provider ? RESTORE_PROVIDER_LABELS[item.provider] || item.provider : '手动填码';
+    return `<div class="restore-row"><span class="mono">${item.email}</span>` +
+      `<span>${providerLabel}${item.tag ? ` · ${item.tag}` : ''}</span>` +
+      `<span>${status}</span></div>`;
+  }).join('');
+}
+
+async function parseRestoreList() {
+  const fileNames = inputRestoreFiles && inputRestoreFiles.files
+    ? Array.from(inputRestoreFiles.files).map((file) => file.name)
+    : [];
+  const text = [inputRestoreList ? inputRestoreList.value : '', ...fileNames].join('\n');
+  if (!text.trim()) {
+    showToast('请先粘贴过期认证文件名，或选择 .json 文件', 'error');
+    return;
+  }
+  try {
+    const response = await chrome.runtime.sendMessage({ type: 'PARSE_RESTORE_LIST', source: 'sidepanel', payload: { text } });
+    if (response?.error) throw new Error(response.error);
+    restoreItems = response.items || [];
+    restoreResults = [];
+    renderRestoreList();
+    const skipped = response.skipped || [];
+    if (!restoreItems.length) {
+      showToast('没有解析出可用邮箱，请检查文件名格式', 'error');
+    } else {
+      showToast(`已解析 ${restoreItems.length} 个邮箱${skipped.length ? `，跳过 ${skipped.length} 条` : ''}`, 'ok');
+    }
+    skipped.forEach((entry) => appendLog({ timestamp: Date.now(), level: 'warn', message: `恢复解析跳过：${entry.input}（${entry.reason}）` }));
+  } catch (err) {
+    showToast(`解析失败：${err.message}`, 'error');
+  }
+}
+
+async function startRestore() {
+  if (!restoreItems.length) {
+    await parseRestoreList();
+  }
+  if (!restoreItems.length) return;
+  const missingPassword = restoreItems.filter((item) => !item.hasSavedPassword);
+  if (missingPassword.length && !(inputRestorePassword && inputRestorePassword.value)) {
+    showToast(`以下 ${missingPassword.length} 个账号扩展里没存过密码：${missingPassword.slice(0, 3).map((item) => item.email).join('、')}${missingPassword.length > 3 ? '…' : ''}，请先填通用密码`, 'error');
+    return;
+  }
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: 'START_RESTORE',
+      source: 'sidepanel',
+      payload: {
+        items: restoreItems,
+        commonPassword: inputRestorePassword ? inputRestorePassword.value : '',
+        continueOnFailure: inputRestoreContinue ? inputRestoreContinue.checked : true,
+      },
+    });
+    if (response?.error) throw new Error(response.error);
+    showToast(`开始批量恢复 ${restoreItems.length} 个账号`, 'ok');
+  } catch (err) {
+    showToast(`开始恢复失败：${err.message}`, 'error');
+  }
+}
+
+function exportRestoreResults() {
+  if (!restoreResults.length && !restoreItems.length) {
+    showToast('暂无恢复结果可导出', 'error');
+    return;
+  }
+  const payload = {
+    exportedAt: new Date().toISOString(),
+    items: restoreItems,
+    results: restoreResults,
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = `codex-auth-restore-${new Date().toISOString().slice(0, 10)}.json`;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+function initializeRestoreActions() {
+  if (btnParseRestore) btnParseRestore.addEventListener('click', parseRestoreList);
+  if (btnStartRestore) btnStartRestore.addEventListener('click', startRestore);
+  if (btnExportRestore) btnExportRestore.addEventListener('click', exportRestoreResults);
+  if (inputRestoreFiles) {
+    inputRestoreFiles.addEventListener('change', () => {
+      // 选文件只取名字；解析时再把名字拼进列表，不读文件内容。
+      if (inputRestoreFiles.files?.length) parseRestoreList();
+    });
+  }
+}
+
 // Theme Toggle
 // ============================================================
 
@@ -1353,6 +1487,7 @@ btnTheme.addEventListener('click', () => {
 
 initTheme();
 initializeStepActions();
+initializeRestoreActions();
 resetActionModalButtons();
 restoreState().then(() => {
   syncPasswordToggleLabel();

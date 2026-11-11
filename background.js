@@ -1,6 +1,13 @@
 // background.js — Service Worker: orchestration, state, tab management, message routing
 
-importScripts('data/names.js', 'shared/mail-2925.js', 'shared/verification-timing.js');
+importScripts('data/names.js', 'shared/mail-2925.js', 'shared/verification-timing.js', 'shared/auth-restore.js');
+
+const {
+  parseAuthFileName = () => ({ ok: false, error: 'auth-restore 未加载' }),
+  parseAuthFileList = () => ({ items: [], skipped: [] }),
+  inferRestoreProvider = () => null,
+  findSavedPassword = () => null,
+} = globalThis.AuthRestore || {};
 
 const {
   build2925ChildEmail = () => null,
@@ -80,6 +87,11 @@ const DEFAULT_STATE = {
   autoRunCurrentRun: 0,
   autoRunTotalRuns: 1,
   autoRunAttemptRun: 0,
+  // 批量恢复过期认证（shared/auth-restore.js）：队列只存在内存里，
+  // 结果写回这里供侧边栏读取；每轮 resetState 会清掉它，见 restoreLoop。
+  restoreRunning: false,
+  restoreCurrent: null, // { fileName, email } | null
+  restoreResults: [], // [{ fileName, email, status: 'ok'|'failed'|'skipped', error? }]
 };
 
 async function getState() {
@@ -861,6 +873,41 @@ async function handleMessage(message, sender) {
       }
       await executeStep(step);
       return { ok: true };
+    }
+
+    case 'PARSE_RESTORE_LIST': {
+      // 只解析文件名，不读文件内容；密码只返回“有没有存过”，不返回密码本身。
+      const parsed = parseAuthFileList(message.payload?.text || '');
+      const state = await getState();
+      const items = parsed.items.map((item) => ({
+        ...item,
+        provider: inferRestoreProvider(item.email),
+        hasSavedPassword: Boolean(findSavedPassword(state.accounts, item.email)),
+      }));
+      return { ok: true, items, skipped: parsed.skipped };
+    }
+
+    case 'START_RESTORE': {
+      if (autoRunActive || restoreActive) {
+        return { ok: false, error: '已有流程正在运行中，请先停止后再恢复。' };
+      }
+      clearStopRequest();
+      const items = Array.isArray(message.payload?.items) ? message.payload.items : [];
+      if (!items.length) {
+        return { ok: false, error: '恢复列表为空，请先粘贴或选择过期认证文件名。' };
+      }
+      restoreLoop(items, {
+        commonPassword: message.payload?.commonPassword || '',
+        continueOnFailure: message.payload?.continueOnFailure !== false,
+      }).catch((err) => {
+        addLog(`批量恢复异常终止：${err.message}`, 'error').catch(() => {});
+      });
+      return { ok: true };
+    }
+
+    case 'GET_RESTORE_RESULTS': {
+      const state = await getState();
+      return { ok: true, results: state.restoreResults || restoreResults, running: restoreActive };
     }
 
     case 'AUTO_RUN': {
@@ -2042,6 +2089,117 @@ async function autoRunLoop(totalRuns, options = {}) {
       { currentRun: successfulRuns, totalRuns: autoRunTotalRuns, attemptRun: attemptRuns }
     ),
   });
+  clearStopRequest();
+}
+
+// ============================================================
+// 批量恢复过期认证
+// ============================================================
+// 恢复 ≠ 修复旧文件：旧的 auth.json 已过期、无法复活。恢复是拿文件名里的
+// 邮箱 + 该账号密码，跳过注册（步骤 2-5），只重走登录授权链路
+// 步骤 1 -> 6 -> 7 -> 8 -> 9，让 VPS 重新生成一份新的认证文件。
+// 密码来源（按顺序）：扩展已保存的 accounts（步骤 3 存下）> 恢复面板填的
+// 通用密码；两者都没有就把该账号记为失败，不会拿空密码去试登录。
+// 邮箱 provider 按域名推断（shared/auth-restore.js）；推断不出的域名
+// （如 maoerai.cloud 这类自有域名）切手动模式，步骤 7 暂停等用户填登录验证码。
+let restoreActive = false;
+let restoreResults = [];
+
+async function runRestoreForAccount(item, context, index, total) {
+  const state = await getState();
+  const password = findSavedPassword(state.accounts, item.email) || context.commonPassword || null;
+  if (!password) {
+    throw new Error('缺密码：扩展里没存过这个账号的密码，也没填通用密码');
+  }
+  const provider = inferRestoreProvider(item.email);
+  const runMode = provider ? RUN_MODE_AUTO : RUN_MODE_MANUAL;
+
+  // 每轮从干净的流程状态开始，但保留 VPS 地址、已保存账号等设置。
+  const prevState = await getState();
+  await resetState();
+  await setState(buildAutoRunKeepSettings(prevState, {
+    currentRun: index + 1,
+    totalRuns: total,
+    attemptRun: 1,
+  }, { discardThread: true }));
+  await setState({
+    email: item.email,
+    password,
+    runMode,
+    emailProvider: provider || prevState.emailProvider,
+    restoreRunning: true,
+    restoreCurrent: { fileName: item.fileName, email: item.email },
+  });
+  await setEmailState(item.email);
+  await setPasswordState(password);
+  chrome.runtime.sendMessage({ type: 'AUTO_RUN_RESET' }).catch(() => {});
+  await sleepWithStop(500);
+
+  await addLog(
+    `恢复 ${index + 1}/${total}：${item.email}（来自 ${item.fileName}）` +
+    (provider ? `，收码走 ${getEmailFetchDisplayName(provider)}` : '，邮箱域名无法推断收码渠道，步骤 7 将暂停等你手动填登录验证码'),
+    'info'
+  );
+  await broadcastAutoRunStatus('running', { currentRun: index + 1, totalRuns: total, attemptRun: 1 });
+
+  const stepDelays = { 1: 2000, 6: 3000, 7: 2000, 8: 2000, 9: 1000 };
+  for (const step of [1, 6, 7, 8, 9]) {
+    await executeStepAndWait(step, stepDelays[step] || 2000);
+  }
+}
+
+async function restoreLoop(items, context = {}) {
+  if (restoreActive) {
+    await addLog('批量恢复已在进行中', 'warn');
+    return;
+  }
+  clearStopRequest();
+  restoreActive = true;
+  restoreResults = [];
+  const total = items.length;
+  let succeeded = 0;
+
+  await setState({
+    restoreRunning: true,
+    restoreResults: [],
+    ...getAutoRunStateUpdate('running', { currentRun: 0, totalRuns: total, attemptRun: 0 }),
+  });
+
+  for (let index = 0; index < items.length; index++) {
+    const item = items[index];
+    try {
+      throwIfStopped();
+      await runRestoreForAccount(item, context, index, total);
+      succeeded += 1;
+      restoreResults.push({ fileName: item.fileName, email: item.email, status: 'ok' });
+      await addLog(`恢复 ${index + 1}/${total} 已完成：${item.email}，新认证文件已由 VPS 生成`, 'ok');
+    } catch (err) {
+      if (isStopError(err)) {
+        restoreResults.push({ fileName: item.fileName, email: item.email, status: 'skipped', error: '已被用户停止' });
+        await addLog(`恢复已停止：${item.email}`, 'warn');
+        break;
+      }
+      restoreResults.push({ fileName: item.fileName, email: item.email, status: 'failed', error: err.message });
+      await addLog(`恢复 ${index + 1}/${total} 失败：${item.email}：${err.message}`, 'error');
+      if (context.continueOnFailure === false) {
+        break;
+      }
+    }
+    await setState({ restoreResults: [...restoreResults] });
+    broadcastDataUpdate({ restoreResults: [...restoreResults] });
+  }
+
+  restoreActive = false;
+  const phase = stopRequested ? 'stopped' : (succeeded >= total ? 'complete' : 'stopped');
+  await setState({
+    restoreRunning: false,
+    restoreCurrent: null,
+    restoreResults: [...restoreResults],
+    ...getAutoRunStateUpdate(phase, { currentRun: succeeded, totalRuns: total, attemptRun: 1 }),
+  });
+  broadcastDataUpdate({ restoreResults: [...restoreResults], restoreCurrent: null });
+  await broadcastAutoRunStatus(phase, { currentRun: succeeded, totalRuns: total, attemptRun: 1 });
+  await addLog(`批量恢复结束：成功 ${succeeded}/${total}，失败 ${total - succeeded} 个`, succeeded >= total ? 'ok' : 'warn');
   clearStopRequest();
 }
 

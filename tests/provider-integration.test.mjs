@@ -24,10 +24,10 @@ function test(name, fn) {
   }
 }
 
-test('manifest 已升级到 v3.0.1 并声明多邮箱内容脚本', () => {
+test('manifest 已升级到 v3.1.0 并声明多邮箱内容脚本', () => {
   const manifest = readJson('manifest.json');
 
-  assert.equal(manifest.version, '3.0.1');
+  assert.equal(manifest.version, '3.1.0');
 
   const scriptBundles = manifest.content_scripts.map((item) => ({
     matches: item.matches,

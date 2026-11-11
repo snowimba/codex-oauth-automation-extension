@@ -638,6 +638,16 @@ header {
   box-shadow: var(--shadow-sm);
 }
 
+.restore-list { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+.restore-row {
+  display: flex; justify-content: space-between; gap: 8px;
+  background: var(--bg-surface); border: 1px solid var(--border);
+  border-radius: var(--radius-md); padding: 6px 10px;
+  font-size: 12px; color: var(--text-secondary);
+}
+.restore-row .mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#input-restore-list { resize: vertical; min-height: 64px; }
+
 #log-area::-webkit-scrollbar { width: 5px; }
 #log-area::-webkit-scrollbar-track { background: transparent; }
 #log-area::-webkit-scrollbar-thumb { background: var(--bg-elevated); border-radius: 4px; }
