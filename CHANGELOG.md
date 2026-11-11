@@ -1,5 +1,10 @@
 # Changelog
 
+## 6.7 — 修 Service Worker 加载失败（6.5 回归）
+
+- 6.5 接恢复 runner 时把 `findSavedPassword: findSavedRestorePassword` 写成了裸简写 `findSavedPassword,`，但 background.js 顶层没有这个名字的变量，Service Worker 一加载就报 `ReferenceError: findSavedPassword is not defined`，扩展直接起不来。已改回带别名的写法。
+- 加了回归测试：检查恢复 runner 接线里每个简写依赖都在 background.js 里有定义。`node --check` 查不出未定义变量，只能靠这层静态检查。
+
 ## 6.6 — 步骤 9 同意页卡住时给出快照，不再盲目重试
 
 - 问题：恢复时浏览器已有登录会话，步骤 7 会直接进入 OAuth 同意页、跳过步骤 8；步骤 9 点“继续”三轮（requestSubmit、调试器点击、原生点击）页面都无反应，旧代码只会刷新重试 5 轮，日志里看不到页面到底是什么状态。

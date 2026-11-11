@@ -252,8 +252,45 @@ test('sidepanel has the batch restore section and controls', () => {
   assert.match(sidepanelSource, /GET_RESTORE_RESULTS/);
 });
 
-test('manifest is bumped to 6.6 for the consent snapshot release', () => {
+test('restore runner wiring references only bindings defined in background.js', () => {
+  // 回归：6.5 曾把 `findSavedPassword: findSavedRestorePassword` 写成
+  // 裸简写 `findSavedPassword,`，background.js 顶层根本没有这个变量，
+  // Service Worker 一加载就报 ReferenceError，整个扩展起不来。
+  // node --check 查不出未定义变量，所以用静态检查兜底。
+  const backgroundSource = fs.readFileSync('background.js', 'utf8');
+  const callMatch = backgroundSource.match(/createRestoreChain\(\{([\s\S]*?)\}\);/);
+  assert.ok(callMatch, 'restore runner instantiation not found');
+  const shorthandNames = [...callMatch[1].matchAll(/^\s*([A-Za-z_$][\w$]*)\s*,/gm)].map((m) => m[1]);
+  assert.ok(shorthandNames.length > 0, 'expected shorthand deps in the restore runner call');
+
+  const defined = new Set();
+  for (const m of backgroundSource.matchAll(/^\s*(?:const|let|var)\s+([A-Za-z_$][\w$]*)/gm)) {
+    defined.add(m[1]);
+  }
+  for (const m of backgroundSource.matchAll(/^\s*(?:async\s+)?function\s+([A-Za-z_$][\w$]*)/gm)) {
+    defined.add(m[1]);
+  }
+  for (const m of backgroundSource.matchAll(/^\s*(?:const|let|var)\s*\{([\s\S]*?)\}\s*=/gm)) {
+    for (const item of m[1].split(',')) {
+      const trimmed = item.trim();
+      if (!trimmed) continue;
+      const aliasMatch = trimmed.match(/:\s*([A-Za-z_$][\w$]*)/);
+      if (aliasMatch) {
+        defined.add(aliasMatch[1]);
+      } else {
+        const bare = trimmed.match(/^([A-Za-z_$][\w$]*)/);
+        if (bare) defined.add(bare[1]);
+      }
+    }
+  }
+  for (const name of shorthandNames) {
+    assert.ok(defined.has(name), `restore runner dep "${name}" is not defined in background.js`);
+  }
+  assert.doesNotMatch(backgroundSource, /^\s*findSavedPassword,$/m);
+});
+
+test('manifest is bumped to 6.7 for the service worker load fix', () => {
   const manifest = JSON.parse(fs.readFileSync('manifest.json', 'utf8'));
-  assert.equal(manifest.version, '6.6');
-  assert.equal(manifest.version_name, 'Ultra6.6');
+  assert.equal(manifest.version, '6.7');
+  assert.equal(manifest.version_name, 'Ultra6.7');
 });

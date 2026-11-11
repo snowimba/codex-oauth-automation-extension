@@ -9620,7 +9620,7 @@ const authRestoreChain = self.MultiPageAuthRestoreRunner?.createRestoreChain({
   addLog,
   broadcastDataUpdate,
   executeStepAndWait: (...args) => executeStepAndWait(...args),
-  findSavedPassword,
+  findSavedPassword: findSavedRestorePassword,
   getState,
   inferRestoreMailProvider,
   isStopError,
