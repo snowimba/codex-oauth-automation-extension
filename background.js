@@ -21,6 +21,7 @@ importScripts(
   'background/message-router.js',
   'background/verification-flow.js',
   'background/auto-run-controller.js',
+  'background/auth-restore-runner.js',
   'background/tab-runtime.js',
   'background/navigation-utils.js',
   'background/logging-status.js',
@@ -123,7 +124,6 @@ const {
   inferRestoreMailProvider,
   parseAuthFileList,
 } = self.AuthRestoreUtils || {};
-const RESTORE_START_STEP = Number(self.AuthRestoreUtils?.RESTORE_START_STEP) || 6;
 const {
   MAIL2925_LIMIT_COOLDOWN_MS,
   findMail2925Account,
@@ -9612,6 +9612,24 @@ const autoRunController = self.MultiPageBackgroundAutoRunController?.createAutoR
   chrome,
 });
 
+// 批量恢复过期认证的专用链路（见 background/auth-restore-runner.js）：
+// 不走注册用的 runAutoSequenceFromStep，只按 6 -> 7 -> 8 -> 9 -> 10
+// 调已有步骤执行器，失败记失败、不重开，手动填码的账号关掉 5 分钟
+// 授权链总超时。
+const authRestoreChain = self.MultiPageAuthRestoreRunner?.createRestoreChain({
+  addLog,
+  broadcastDataUpdate,
+  executeStepAndWait: (...args) => executeStepAndWait(...args),
+  findSavedPassword,
+  getState,
+  inferRestoreMailProvider,
+  isStopError,
+  resetState,
+  setEmailState,
+  setPasswordState,
+  setState,
+});
+
 async function resumeAutoRunIfWaitingForEmail(options = {}) {
   const { silent = false } = options;
   const state = await getState();
@@ -9951,7 +9969,7 @@ async function ensureAutoEmailReady(targetRun, totalRuns, attemptRuns) {
 }
 
 async function runAutoSequenceFromStep(startStep, context = {}) {
-  const { targetRun, totalRuns, attemptRuns, continued = false, restore = false } = context;
+  const { targetRun, totalRuns, attemptRuns, continued = false } = context;
   let postStep7RestartCount = 0;
   let goPayCheckoutRestartCount = 0;
   let step4RestartCount = 0;
@@ -9963,8 +9981,6 @@ async function runAutoSequenceFromStep(startStep, context = {}) {
 
   if (continueCurrentAttempt) {
     await addLog(`=== 目标 ${targetRun}/${totalRuns} 轮：继续当前进度，从步骤 ${startStep} 开始（第 ${attemptRuns} 次尝试）===`, 'info');
-  } else if (restore) {
-    await addLog(`=== 批量恢复 ${targetRun}/${totalRuns}：重走登录授权链路（步骤 6-10）===`, 'info');
   } else {
     await addLog(`=== 目标 ${targetRun}/${totalRuns} 轮：第 ${attemptRuns} 次尝试，阶段 1，打开官网并进入密码页 ===`, 'info');
   }
@@ -10162,56 +10178,9 @@ async function runRestoreForAccount(account, context = {}) {
   authRestoreResults.push(result);
   authRestoreCurrent = email;
   broadcastAuthRestoreResults();
-
-  const currentState = await getState();
-  const savedAccounts = Array.isArray(currentState.accounts) ? currentState.accounts : [];
-  const password = (typeof findSavedRestorePassword === 'function'
-    ? findSavedRestorePassword(savedAccounts, email)
-    : null) || String(commonPassword || '').trim();
-  if (!password) {
-    result.status = 'failed';
-    result.reason = '缺少密码：扩展未保存该账号密码，且未填写通用密码';
-    authRestoreCurrent = '';
-    broadcastAuthRestoreResults();
-    await addLog(`批量恢复：${email} 缺少密码，已跳过。`, 'error');
-    if (!continueOnFailure) {
-      throw new Error(result.reason);
-    }
-    return result;
-  }
-
-  const inferred = (typeof inferRestoreMailProvider === 'function'
-    ? inferRestoreMailProvider(email)
-    : { mailProvider: 'custom', manual: true });
-  result.mailProvider = inferred.mailProvider || String(currentState.mailProvider || '163');
-  result.manual = Boolean(inferred.manual);
-
-  // 每轮从干净状态开始：resetState 会保留持久化设置（VPS 地址、
-  // 自定义密码、收码邮箱等），这里只把当前账号的邮箱 / 密码 /
-  // 收码邮箱写进去，并强制普通模式（恢复只针对免费账号）。
-  await resetState();
-  await setEmailState(email);
-  await setPasswordState(password);
-  const restoreStateUpdates = { plusModeEnabled: false, signupMethod: 'email' };
-  if (inferred.mailProvider) {
-    restoreStateUpdates.mailProvider = inferred.mailProvider;
-  }
-  await setState(restoreStateUpdates);
-  broadcastDataUpdate({ mailProvider: (await getState()).mailProvider });
-
-  await addLog(
-    `批量恢复：第 ${index + 1}/${total} 个账号 ${email}（${result.manual ? '手动填登录验证码' : '收码邮箱：' + result.mailProvider}），开始重走步骤 6-10。`,
-    'info'
-  );
   try {
-    await runAutoSequenceFromStep(RESTORE_START_STEP, {
-      targetRun: index + 1,
-      totalRuns: total,
-      attemptRuns: 1,
-      restore: true,
-    });
-    result.status = 'success';
-    await addLog(`批量恢复：第 ${index + 1}/${total} 个账号 ${email} 恢复成功。`, 'ok');
+    const completed = await authRestoreChain.runRestoreAccount(account, { commonPassword, index, total });
+    Object.assign(result, completed);
   } catch (err) {
     if (isStopError(err)) {
       result.status = 'failed';
@@ -10222,14 +10191,12 @@ async function runRestoreForAccount(account, context = {}) {
     }
     result.status = 'failed';
     result.reason = err?.message || String(err || '未知错误');
-    await addLog(`批量恢复：第 ${index + 1}/${total} 个账号 ${email} 失败：${result.reason}`, 'error');
-    if (!continueOnFailure) {
-      authRestoreCurrent = '';
-      broadcastAuthRestoreResults();
-      throw new Error(`第 ${index + 1} 个账号 ${email} 失败，已停止。原因：${result.reason}`);
-    }
   }
-
+  if (result.status === 'failed' && !continueOnFailure && result.reason !== '已停止') {
+    authRestoreCurrent = '';
+    broadcastAuthRestoreResults();
+    throw new Error(`第 ${index + 1} 个账号 ${email} 失败，已停止。原因：${result.reason}`);
+  }
   authRestoreCurrent = '';
   broadcastAuthRestoreResults();
   return result;
